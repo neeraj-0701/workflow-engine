@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  # ── Workflow Engine API ──────────────────────────────────────────
+  api:
+    build:
+      context: .
+      target: production
+    container_name: workflow-engine-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://workflow:workflow@db:5432/workflow_db
+      - CONFIGS_DIR=configs
+      - LOG_LEVEL=info
+      - DB_ECHO=false
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./configs:/app/configs  # Mount configs for hot reload
+    restart: unless-stopped
+    networks:
+      - workflow-net
+
+  # ── PostgreSQL Database ──────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: workflow-engine-db
+    environment:
+      POSTGRES_USER: workflow
+      POSTGRES_PASSWORD: workflow
+      POSTGRES_DB: workflow_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workflow -d workflow_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - workflow-net
+
+  # ── Adminer (optional DB UI) ─────────────────────────────────────
+  adminer:
+    image: adminer:4
+    container_name: workflow-engine-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    networks:
+      - workflow-net
+    profiles:
+      - dev  # Only starts with: docker compose --profile dev up
+
+volumes:
+  postgres_data:
+
+networks:
+  workflow-net:
+    driver: bridge

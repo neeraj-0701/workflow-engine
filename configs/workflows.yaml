@@ -1,0 +1,327 @@
+# ============================================================
+# WORKFLOW CONFIGURATION: Insurance Claim Processing
+# ============================================================
+
+claim_processing:
+  description: "Insurance claim processing and approval workflow"
+  version: "1.0.0"
+  max_retries: 3
+  timeout_seconds: 90
+  rule_logic: "AND"
+
+  steps:
+    - name: validate_claim
+      type: validate
+      required_fields:
+        - name: claimant_name
+          type: string
+        - name: claim_amount
+          type: number
+        - name: incident_date
+          type: string
+        - name: policy_number
+          type: string
+        - name: claim_type
+
+    - name: claim_eligibility_check
+      type: rule_check
+      fail_on_rule_failure: false
+      logic: "AND"
+      rules:
+        - name: claim_amount_reasonable
+          field: claim_amount
+          operator: gte
+          value: 100
+          fail_message: "Claim amount {actual} is below minimum threshold of $100"
+
+        - name: claim_amount_within_limit
+          field: claim_amount
+          operator: lte
+          value: 1000000
+          fail_message: "Claim amount {actual} exceeds maximum coverage limit"
+
+        - name: valid_claim_type
+          field: claim_type
+          operator: in
+          value: ["medical", "property", "auto", "liability", "life"]
+          fail_message: "Invalid claim type: {actual}"
+
+    - name: policy_validation
+      type: external_call
+      service: insurance_check
+      max_retries: 3
+      retry_delay_seconds: 1
+
+    - name: fraud_screening
+      type: external_call
+      service: sanctions_screening
+      max_retries: 2
+      retry_delay_seconds: 0.5
+
+    - name: document_check
+      type: external_call
+      service: document_verification
+      max_retries: 2
+      retry_delay_seconds: 1
+      required: false
+
+    - name: claim_decision
+      type: decision
+      logic: "AND"
+      rules:
+        - name: amount_in_range
+          field: claim_amount
+          operator: between
+          value: [100, 1000000]
+
+        - name: claim_type_valid
+          field: claim_type
+          operator: in
+          value: ["medical", "property", "auto", "liability", "life"]
+
+    - name: notify_claimant
+      type: notification
+      channel: email
+      template: claim_decision
+      required: false
+
+
+# ============================================================
+# WORKFLOW CONFIGURATION: Employee Onboarding
+# ============================================================
+
+employee_onboarding:
+  description: "New employee onboarding and access provisioning workflow"
+  version: "1.0.0"
+  max_retries: 2
+  timeout_seconds: 120
+  rule_logic: "AND"
+
+  steps:
+    - name: validate_employee_data
+      type: validate
+      required_fields:
+        - name: employee_name
+          type: string
+        - name: department
+          type: string
+        - name: role
+          type: string
+        - name: start_date
+          type: string
+        - name: employment_type
+
+    - name: employee_eligibility
+      type: rule_check
+      fail_on_rule_failure: true
+      logic: "AND"
+      rules:
+        - name: valid_department
+          field: department
+          operator: in
+          value: ["engineering", "sales", "marketing", "finance", "hr", "operations", "legal"]
+          fail_message: "Invalid department: {actual}"
+
+        - name: valid_employment_type
+          field: employment_type
+          operator: in
+          value: ["full_time", "part_time", "contractor", "intern"]
+          fail_message: "Invalid employment type: {actual}"
+
+    - name: background_screening
+      type: external_call
+      service: background_check
+      max_retries: 3
+      retry_delay_seconds: 2
+      required: true
+
+    - name: identity_verification
+      type: external_call
+      service: kyc_verification
+      max_retries: 2
+      retry_delay_seconds: 1
+      required: true
+
+    - name: tax_compliance_check
+      type: external_call
+      service: tax_verification
+      max_retries: 2
+      retry_delay_seconds: 1
+      required: false
+
+    - name: onboarding_decision
+      type: decision
+      logic: "AND"
+      rules:
+        - name: valid_role
+          field: role
+          operator: not_null
+
+        - name: valid_department_final
+          field: department
+          operator: in
+          value: ["engineering", "sales", "marketing", "finance", "hr", "operations", "legal"]
+
+    - name: provision_system_access
+      type: process
+      processing_delay: 0.1
+      transforms:
+        access_level: "$department"
+        provisioned: true
+
+    - name: send_welcome_email
+      type: notification
+      channel: email
+      template: welcome_employee
+      required: false
+
+
+# ============================================================
+# WORKFLOW CONFIGURATION: Vendor Approval
+# ============================================================
+
+vendor_approval:
+  description: "New vendor onboarding and approval workflow"
+  version: "1.0.0"
+  max_retries: 3
+  timeout_seconds: 60
+
+  steps:
+    - name: validate_vendor_data
+      type: validate
+      required_fields:
+        - name: vendor_name
+          type: string
+        - name: vendor_type
+        - name: annual_revenue
+          type: number
+        - name: years_in_business
+          type: number
+        - name: tax_id
+          type: string
+
+    - name: vendor_eligibility_rules
+      type: rule_check
+      fail_on_rule_failure: false
+      logic: "AND"
+      rules:
+        - name: minimum_years_operation
+          field: years_in_business
+          operator: gte
+          value: 2
+          fail_message: "Vendor has only been in business {actual} year(s); minimum is 2"
+
+        - name: minimum_revenue
+          field: annual_revenue
+          operator: gte
+          value: 100000
+          fail_message: "Annual revenue {actual} below minimum threshold of $100,000"
+
+        - name: valid_vendor_type
+          field: vendor_type
+          operator: in
+          value: ["supplier", "service_provider", "consultant", "contractor", "distributor"]
+
+    - name: sanctions_check
+      type: external_call
+      service: sanctions_screening
+      max_retries: 3
+      retry_delay_seconds: 0.5
+
+    - name: document_verification
+      type: external_call
+      service: document_verification
+      max_retries: 2
+      retry_delay_seconds: 1
+
+    - name: background_check
+      type: external_call
+      service: background_check
+      max_retries: 2
+      retry_delay_seconds: 1
+      required: false
+
+    - name: vendor_decision
+      type: decision
+      logic: "AND"
+      rules:
+        - name: years_in_business_final
+          field: years_in_business
+          operator: gte
+          value: 2
+
+        - name: revenue_threshold
+          field: annual_revenue
+          operator: gte
+          value: 100000
+
+    - name: notify_vendor
+      type: notification
+      channel: email
+      template: vendor_decision
+      required: false
+
+
+# ============================================================
+# WORKFLOW CONFIGURATION: Document Verification
+# ============================================================
+
+document_verification:
+  description: "Document authenticity and compliance verification workflow"
+  version: "1.0.0"
+  max_retries: 2
+  timeout_seconds: 30
+
+  steps:
+    - name: validate_document_request
+      type: validate
+      required_fields:
+        - name: document_type
+          type: string
+        - name: document_id
+          type: string
+        - name: submitter_name
+          type: string
+        - name: purpose
+
+    - name: document_type_check
+      type: rule_check
+      fail_on_rule_failure: true
+      rules:
+        - name: valid_document_type
+          field: document_type
+          operator: in
+          value: ["passport", "drivers_license", "national_id", "birth_certificate", "tax_return", "bank_statement"]
+          fail_message: "Unsupported document type: {actual}"
+
+    - name: document_authenticity_check
+      type: external_call
+      service: document_verification
+      max_retries: 3
+      retry_delay_seconds: 0.5
+
+    - name: identity_cross_check
+      type: external_call
+      service: kyc_verification
+      max_retries: 2
+      retry_delay_seconds: 0.5
+      required: false
+
+    - name: verification_decision
+      type: decision
+      logic: "AND"
+      rules:
+        - name: document_id_present
+          field: document_id
+          operator: not_null
+
+        - name: valid_purpose
+          field: purpose
+          operator: in
+          value: ["identity_verification", "compliance", "onboarding", "renewal", "background_check"]
+
+    - name: log_verification_result
+      type: notification
+      channel: audit
+      template: document_verified
+      required: false

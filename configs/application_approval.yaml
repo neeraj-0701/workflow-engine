@@ -1,0 +1,117 @@
+# ============================================================
+# WORKFLOW CONFIGURATION: Application Approval
+# ============================================================
+# Loan/credit application approval workflow.
+# Validates applicant data, checks eligibility rules,
+# verifies identity/credit externally, then makes a decision.
+# ============================================================
+
+application_approval:
+  description: "Loan/credit application approval workflow"
+  version: "1.0.0"
+  max_retries: 3
+  timeout_seconds: 60
+  rule_logic: "AND"
+
+  steps:
+    - name: validate_input
+      type: validate
+      required_fields:
+        - name: applicant_name
+          type: string
+        - name: salary
+          type: number
+        - name: loan_amount
+          type: number
+        - name: credit_score
+          type: number
+        - name: document_submitted
+          type: boolean
+
+    - name: eligibility_rules
+      type: rule_check
+      fail_on_rule_failure: false  # Log failures but continue to decision step
+      logic: "AND"
+      rules:
+        - name: minimum_salary
+          field: salary
+          operator: gte
+          value: 30000
+          fail_message: "Salary {actual} is below minimum required {expected}"
+
+        - name: minimum_credit_score
+          field: credit_score
+          operator: gte
+          value: 620
+          fail_message: "Credit score {actual} is below minimum {expected}"
+
+        - name: loan_to_income_ratio
+          type: composite
+          logic: "AND"
+          name: loan_to_income_ratio
+          conditions:
+            - name: loan_not_too_large
+              field: loan_amount
+              operator: lte
+              value: 500000
+            - name: salary_positive
+              field: salary
+              operator: gt
+              value: 0
+
+        - name: document_submitted
+          field: document_submitted
+          operator: is_true
+          fail_message: "Required documents not submitted"
+
+    - name: credit_bureau_check
+      type: external_call
+      service: credit_bureau
+      max_retries: 3
+      retry_delay_seconds: 1
+      backoff_multiplier: 2.0
+      required: true
+
+    - name: kyc_verification
+      type: external_call
+      service: kyc_verification
+      max_retries: 2
+      retry_delay_seconds: 0.5
+      required: true
+
+    - name: employment_verification
+      type: external_call
+      service: employment_verification
+      max_retries: 2
+      retry_delay_seconds: 1
+      required: false  # Optional - don't fail workflow if unavailable
+
+    - name: final_approval_decision
+      type: decision
+      logic: "AND"
+      rules:
+        - name: credit_score_final
+          field: credit_score
+          operator: gte
+          value: 620
+
+        - name: salary_sufficient
+          field: salary
+          operator: gte
+          value: 30000
+
+        - name: document_verified
+          field: document_submitted
+          operator: is_true
+
+    - name: send_decision_notification
+      type: notification
+      channel: email
+      template: application_decision
+      required: false
+
+  # Used for final validation after all steps complete
+  final_rules:
+    - name: not_sanctioned
+      field: document_submitted
+      operator: not_null
